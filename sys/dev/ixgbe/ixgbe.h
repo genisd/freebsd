@@ -497,7 +497,6 @@ struct adapter {
 	u32			optics;
 	u32			fc; /* local flow ctrl setting */
 	int			advertise;  /* link speeds */
-	bool			enable_aim; /* adaptive interrupt moderation */
 	bool			link_active;
 	u16			max_frame_size;
 	u16			num_segs;
@@ -505,7 +504,6 @@ struct adapter {
 	bool			link_up;
 	u32 			vector;
 	u16			dmac;
-	bool			eee_enabled;
 	u32			phy_layer;
 
 	/* Power management-related */
@@ -563,8 +561,8 @@ struct adapter {
 	struct ixgbe_vf		*vfs;
 #endif
 #ifdef DEV_NETMAP
-	void			(*init_locked)(struct adapter *);
-	void			(*stop_locked)(void *);
+	void 			(*init_locked)(struct adapter *);
+	void 			(*stop_locked)(void *);
 #endif
 
 	/* Misc stats maintained by the driver */
