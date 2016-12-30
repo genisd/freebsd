@@ -1,6 +1,6 @@
 /******************************************************************************
 
-  Copyright (c) 2001-2013, Intel Corporation 
+  Copyright (c) 2001-2012, Intel Corporation 
   All rights reserved.
   
   Redistribution and use in source and binary forms, with or without 
@@ -33,15 +33,12 @@
 /*$FreeBSD$*/
 
 
-#ifndef _IXGBE_H_
-#define _IXGBE_H_
+#ifndef _IXV_H_
+#define _IXV_H_
 
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#ifndef IXGBE_LEGACY_TX
-#include <sys/buf_ring.h>
-#endif
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -90,6 +87,7 @@
 #include <machine/smp.h>
 
 #include "ixgbe_api.h"
+#include "ixgbe_vf.h"
 
 /* Tunables */
 
@@ -134,39 +132,21 @@
  * pass between any two TX clean operations, such only happening
  * when the TX hardware is functioning.
  */
-#define IXGBE_WATCHDOG                   (10 * hz)
+#define IXV_WATCHDOG                   (10 * hz)
 
 /*
  * This parameters control when the driver calls the routine to reclaim
  * transmit descriptors.
  */
-#define IXGBE_TX_CLEANUP_THRESHOLD	(adapter->num_tx_desc / 8)
-#define IXGBE_TX_OP_THRESHOLD		(adapter->num_tx_desc / 32)
+#define IXV_TX_CLEANUP_THRESHOLD	(adapter->num_tx_desc / 8)
+#define IXV_TX_OP_THRESHOLD		(adapter->num_tx_desc / 32)
 
-#define IXGBE_MAX_FRAME_SIZE	0x3F00
+#define IXV_MAX_FRAME_SIZE	0x3F00
 
 /* Flow control constants */
-#define IXGBE_FC_PAUSE		0xFFFF
-#define IXGBE_FC_HI		0x20000
-#define IXGBE_FC_LO		0x10000
-
-/*
- * Used for optimizing small rx mbufs.  Effort is made to keep the copy
- * small and aligned for the CPU L1 cache.
- * 
- * MHLEN is typically 168 bytes, giving us 8-byte alignment.  Getting
- * 32 byte alignment needed for the fast bcopy results in 8 bytes being
- * wasted.  Getting 64 byte alignment, which _should_ be ideal for
- * modern Intel CPUs, results in 40 bytes wasted and a significant drop
- * in observed efficiency of the optimization, 97.9% -> 81.8%.
- */
-#define IXGBE_RX_COPY_LEN	160
-#define IXGBE_RX_COPY_ALIGN	(MHLEN - IXGBE_RX_COPY_LEN)
-
-/* Keep older OS drivers building... */
-#if !defined(SYSCTL_ADD_UQUAD)
-#define SYSCTL_ADD_UQUAD SYSCTL_ADD_QUAD
-#endif
+#define IXV_FC_PAUSE		0xFFFF
+#define IXV_FC_HI		0x20000
+#define IXV_FC_LO		0x10000
 
 /* Defines for printing debug information */
 #define DEBUG_INIT  0
@@ -184,19 +164,15 @@
 #define HW_DEBUGOUT2(S, A, B)       if (DEBUG_HW) printf(S "\n", A, B)
 
 #define MAX_NUM_MULTICAST_ADDRESSES     128
-#define IXGBE_82598_SCATTER		100
-#define IXGBE_82599_SCATTER		32
-#define MSIX_82598_BAR			3
-#define MSIX_82599_BAR			4
-#define IXGBE_TSO_SIZE			262140
-#define IXGBE_TX_BUFFER_SIZE		((u32) 1514)
-#define IXGBE_RX_HDR			128
-#define IXGBE_VFTA_SIZE			128
-#define IXGBE_BR_SIZE			4096
-#define IXGBE_QUEUE_MIN_FREE		32
-
-/* IOCTL define to gather SFP+ Diagnostic data */
-#define SIOCGI2C	SIOCGIFGENERIC
+#define IXV_EITR_DEFAULT		128
+#define IXV_SCATTER			32
+#define IXV_RX_HDR			128
+#define MSIX_BAR			3
+#define IXV_TSO_SIZE			65535
+#define IXV_BR_SIZE			4096
+#define IXV_LINK_ITR			2000
+#define TX_BUFFER_SIZE		((u32) 1514)
+#define VFTA_SIZE			128
 
 /* Offload bits in mbuf flag */
 #if __FreeBSD_version >= 800000
@@ -204,15 +180,6 @@
 #else
 #define CSUM_OFFLOAD		(CSUM_IP|CSUM_TCP|CSUM_UDP)
 #endif
-
-/*
- * Interrupt Moderation parameters 
- */
-#define IXGBE_LOW_LATENCY	128
-#define IXGBE_AVE_LATENCY	400
-#define IXGBE_BULK_LATENCY	1200
-#define IXGBE_LINK_ITR		2000
-
 
 /*
  *****************************************************************************
@@ -223,42 +190,33 @@
  * 
  *****************************************************************************
  */
-typedef struct _ixgbe_vendor_info_t {
+typedef struct _ixv_vendor_info_t {
 	unsigned int    vendor_id;
 	unsigned int    device_id;
 	unsigned int    subvendor_id;
 	unsigned int    subdevice_id;
 	unsigned int    index;
-} ixgbe_vendor_info_t;
+} ixv_vendor_info_t;
 
 
-/* This is used to get SFP+ module data */
-struct ixgbe_i2c_req {
-        u8 dev_addr;
-        u8 offset;
-        u8 len;
-        u8 data[8];
-};
-
-struct ixgbe_tx_buf {
-	union ixgbe_adv_tx_desc	*eop;
+struct ixv_tx_buf {
+	u32		eop_index;
 	struct mbuf	*m_head;
 	bus_dmamap_t	map;
 };
 
-struct ixgbe_rx_buf {
-	struct mbuf	*buf;
+struct ixv_rx_buf {
+	struct mbuf	*m_head;
+	struct mbuf	*m_pack;
 	struct mbuf	*fmp;
+	bus_dmamap_t	hmap;
 	bus_dmamap_t	pmap;
-	u_int		flags;
-#define IXGBE_RX_COPY	0x01
-	uint64_t	addr;
 };
 
 /*
- * Bus dma allocation structure used by ixgbe_dma_malloc and ixgbe_dma_free.
+ * Bus dma allocation structure used by ixv_dma_malloc and ixv_dma_free.
  */
-struct ixgbe_dma_alloc {
+struct ixv_dma_alloc {
 	bus_addr_t		dma_paddr;
 	caddr_t			dma_vaddr;
 	bus_dma_tag_t		dma_tag;
@@ -277,6 +235,7 @@ struct ix_queue {
 	u32			msix;           /* This queue's MSIX vector */
 	u32			eims;           /* This queue's EIMS bit */
 	u32			eitr_setting;
+	u32			eitr;		/* cached reg */
 	struct resource		*res;
 	void			*tag;
 	struct tx_ring		*txr;
@@ -293,37 +252,21 @@ struct tx_ring {
         struct adapter		*adapter;
 	struct mtx		tx_mtx;
 	u32			me;
+	bool			watchdog_check;
 	int			watchdog_time;
 	union ixgbe_adv_tx_desc	*tx_base;
-	struct ixgbe_tx_buf	*tx_buffers;
-	struct ixgbe_dma_alloc	txdma;
+	struct ixv_dma_alloc	txdma;
+	u32			next_avail_desc;
+	u32			next_to_clean;
+	struct ixv_tx_buf	*tx_buffers;
 	volatile u16		tx_avail;
-	u16			next_avail_desc;
-	u16			next_to_clean;
-	u16			process_limit;
-	u16			num_desc;
-	enum {
-	    IXGBE_QUEUE_IDLE,
-	    IXGBE_QUEUE_WORKING,
-	    IXGBE_QUEUE_HUNG,
-	}			queue_status;
 	u32			txd_cmd;
 	bus_dma_tag_t		txtag;
 	char			mtx_name[16];
-#ifndef IXGBE_LEGACY_TX
 	struct buf_ring		*br;
-	struct task		txq_task;
-#endif
-#ifdef IXGBE_FDIR
-	u16			atr_sample;
-	u16			atr_count;
-#endif
-	u32			bytes;  /* used for AIM */
-	u32			packets;
 	/* Soft Stats */
-	unsigned long   	tso_tx;
-	unsigned long   	no_tx_map_avail;
-	unsigned long   	no_tx_dma_setup;
+	u32			bytes;
+	u32			packets;
 	u64			no_desc_avail;
 	u64			total_packets;
 };
@@ -337,19 +280,16 @@ struct rx_ring {
 	struct mtx		rx_mtx;
 	u32			me;
 	union ixgbe_adv_rx_desc	*rx_base;
-	struct ixgbe_dma_alloc	rxdma;
+	struct ixv_dma_alloc	rxdma;
 	struct lro_ctrl		lro;
 	bool			lro_enabled;
-	bool			hw_rsc;
+	bool			hdr_split;
 	bool			discard;
-	bool			vtag_strip;
-        u16			next_to_refresh;
-        u16 			next_to_check;
-	u16			num_desc;
-	u16			mbuf_sz;
-	u16			process_limit;
+        u32			next_to_refresh;
+        u32 			next_to_check;
 	char			mtx_name[16];
-	struct ixgbe_rx_buf	*rx_buffers;
+	struct ixv_rx_buf	*rx_buffers;
+	bus_dma_tag_t		htag;
 	bus_dma_tag_t		ptag;
 
 	u32			bytes; /* Used for AIM calc */
@@ -357,14 +297,10 @@ struct rx_ring {
 
 	/* Soft stats */
 	u64			rx_irq;
-	u64			rx_copies;
+	u64			rx_split_packets;
 	u64			rx_packets;
 	u64 			rx_bytes;
 	u64 			rx_discarded;
-	u64 			rsc_num;
-#ifdef IXGBE_FDIR
-	u64			flm;
-#endif
 };
 
 /* Our adapter structure */
@@ -399,37 +335,18 @@ struct adapter {
 	u16			num_vlans;
 	u16			num_queues;
 
-	/*
-	** Shadow VFTA table, this is needed because
-	** the real vlan filter table gets cleared during
-	** a soft reset and the driver needs to be able
-	** to repopulate it.
-	*/
-	u32			shadow_vfta[IXGBE_VFTA_SIZE];
-
-	/* Info about the interface */
-	u32			optics;
-	u32			fc; /* local flow ctrl setting */
-	int			advertise;  /* link speeds */
+	/* Info about the board itself */
 	bool			link_active;
 	u16			max_frame_size;
-	u16			num_segs;
 	u32			link_speed;
 	bool			link_up;
-	u32 			linkvec;
+	u32 			mbxvec;
 
 	/* Mbuf cluster size */
 	u32			rx_mbuf_sz;
 
 	/* Support for pluggable optics */
-	bool			sfp_probe;
-	struct task     	link_task;  /* Link tasklet */
-	struct task     	mod_task;   /* SFP tasklet */
-	struct task     	msf_task;   /* Multispeed Fiber */
-#ifdef IXGBE_FDIR
-	int			fdir_reinit;
-	struct task     	fdir_task;
-#endif
+	struct task     	mbx_task;  /* Mailbox tasklet */
 	struct taskqueue	*tq;
 
 	/*
@@ -445,74 +362,46 @@ struct adapter {
 	 *	Allocated at run time, an array of rings.
 	 */
 	struct tx_ring		*tx_rings;
-	u32			num_tx_desc;
+	int			num_tx_desc;
 
 	/*
 	 * Receive rings:
 	 *	Allocated at run time, an array of rings.
 	 */
 	struct rx_ring		*rx_rings;
+	int			num_rx_desc;
 	u64			que_mask;
-	u32			num_rx_desc;
-
-	/* Multicast array memory */
-	u8			*mta;
-
+	u32			rx_process_limit;
 
 	/* Misc stats maintained by the driver */
 	unsigned long   	dropped_pkts;
 	unsigned long   	mbuf_defrag_failed;
 	unsigned long   	mbuf_header_failed;
 	unsigned long   	mbuf_packet_failed;
+	unsigned long   	no_tx_map_avail;
+	unsigned long   	no_tx_dma_setup;
 	unsigned long   	watchdog_events;
-	unsigned long		link_irq;
+	unsigned long   	tso_tx;
+	unsigned long		mbx_irq;
 
-	struct ixgbe_hw_stats 	stats;
+	struct ixgbevf_hw_stats	stats;
 };
 
 
-/* Precision Time Sync (IEEE 1588) defines */
-#define ETHERTYPE_IEEE1588      0x88F7
-#define PICOSECS_PER_TICK       20833
-#define TSYNC_UDP_PORT          319 /* UDP port for the protocol */
-#define IXGBE_ADVTXD_TSTAMP	0x00080000
-
-
-#define IXGBE_CORE_LOCK_INIT(_sc, _name) \
-        mtx_init(&(_sc)->core_mtx, _name, "IXGBE Core Lock", MTX_DEF)
-#define IXGBE_CORE_LOCK_DESTROY(_sc)      mtx_destroy(&(_sc)->core_mtx)
-#define IXGBE_TX_LOCK_DESTROY(_sc)        mtx_destroy(&(_sc)->tx_mtx)
-#define IXGBE_RX_LOCK_DESTROY(_sc)        mtx_destroy(&(_sc)->rx_mtx)
-#define IXGBE_CORE_LOCK(_sc)              mtx_lock(&(_sc)->core_mtx)
-#define IXGBE_TX_LOCK(_sc)                mtx_lock(&(_sc)->tx_mtx)
-#define IXGBE_TX_TRYLOCK(_sc)             mtx_trylock(&(_sc)->tx_mtx)
-#define IXGBE_RX_LOCK(_sc)                mtx_lock(&(_sc)->rx_mtx)
-#define IXGBE_CORE_UNLOCK(_sc)            mtx_unlock(&(_sc)->core_mtx)
-#define IXGBE_TX_UNLOCK(_sc)              mtx_unlock(&(_sc)->tx_mtx)
-#define IXGBE_RX_UNLOCK(_sc)              mtx_unlock(&(_sc)->rx_mtx)
-#define IXGBE_CORE_LOCK_ASSERT(_sc)       mtx_assert(&(_sc)->core_mtx, MA_OWNED)
-#define IXGBE_TX_LOCK_ASSERT(_sc)         mtx_assert(&(_sc)->tx_mtx, MA_OWNED)
-
-/* For backward compatibility */
-#if !defined(PCIER_LINK_STA)
-#define PCIER_LINK_STA PCIR_EXPRESS_LINK_STA
-#endif
-
-static inline bool
-ixgbe_is_sfp(struct ixgbe_hw *hw)
-{
-	switch (hw->phy.type) {
-	case ixgbe_phy_sfp_avago:
-	case ixgbe_phy_sfp_ftl:
-	case ixgbe_phy_sfp_intel:
-	case ixgbe_phy_sfp_unknown:
-	case ixgbe_phy_sfp_passive_tyco:
-	case ixgbe_phy_sfp_passive_unknown:
-		return TRUE;
-	default:
-		return FALSE;
-	}
-}
+#define IXV_CORE_LOCK_INIT(_sc, _name) \
+        mtx_init(&(_sc)->core_mtx, _name, "IXV Core Lock", MTX_DEF)
+#define IXV_CORE_LOCK_DESTROY(_sc)      mtx_destroy(&(_sc)->core_mtx)
+#define IXV_TX_LOCK_DESTROY(_sc)        mtx_destroy(&(_sc)->tx_mtx)
+#define IXV_RX_LOCK_DESTROY(_sc)        mtx_destroy(&(_sc)->rx_mtx)
+#define IXV_CORE_LOCK(_sc)              mtx_lock(&(_sc)->core_mtx)
+#define IXV_TX_LOCK(_sc)                mtx_lock(&(_sc)->tx_mtx)
+#define IXV_TX_TRYLOCK(_sc)             mtx_trylock(&(_sc)->tx_mtx)
+#define IXV_RX_LOCK(_sc)                mtx_lock(&(_sc)->rx_mtx)
+#define IXV_CORE_UNLOCK(_sc)            mtx_unlock(&(_sc)->core_mtx)
+#define IXV_TX_UNLOCK(_sc)              mtx_unlock(&(_sc)->tx_mtx)
+#define IXV_RX_UNLOCK(_sc)              mtx_unlock(&(_sc)->rx_mtx)
+#define IXV_CORE_LOCK_ASSERT(_sc)       mtx_assert(&(_sc)->core_mtx, MA_OWNED)
+#define IXV_TX_LOCK_ASSERT(_sc)         mtx_assert(&(_sc)->tx_mtx, MA_OWNED)
 
 /* Workaround to make 8.0 buildable */
 #if __FreeBSD_version >= 800000 && __FreeBSD_version < 800504
@@ -531,13 +420,15 @@ drbr_needs_enqueue(struct ifnet *ifp, struct buf_ring *br)
 ** Find the number of unrefreshed RX descriptors
 */
 static inline u16
-ixgbe_rx_unrefreshed(struct rx_ring *rxr)
+ixv_rx_unrefreshed(struct rx_ring *rxr)
 {       
+	struct adapter  *adapter = rxr->adapter;
+        
 	if (rxr->next_to_check > rxr->next_to_refresh)
 		return (rxr->next_to_check - rxr->next_to_refresh - 1);
 	else
-		return ((rxr->num_desc + rxr->next_to_check) -
+		return ((adapter->num_rx_desc + rxr->next_to_check) -
 		    rxr->next_to_refresh - 1);
 }       
 
-#endif /* _IXGBE_H_ */
+#endif /* _IXV_H_ */
